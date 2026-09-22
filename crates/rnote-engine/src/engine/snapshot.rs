@@ -47,6 +47,40 @@ impl Default for EngineSnapshot {
 }
 
 impl EngineSnapshot {
+    /// Compresses the pixels of all bitmap images of the snapshot.
+    ///
+    /// The decoded pixels of a bitmap are large - a single imported Pdf page is 7.1 MB at
+    /// 1123x1589 - so a document holding many of them keeps multiple GB of memory resident. Images
+    /// are stored with their pixels compressed, but files written before that was the case are read
+    /// uncompressed, and those are compressed here. The pixels are then decoded again on demand
+    /// when an image is rendered, which is bounded by the viewport.
+    ///
+    /// Runs in parallel, since a document can hold hundreds of large images.
+    pub fn compact_bitmap_images(&mut self) {
+        use rayon::prelude::*;
+
+        // The strokes are held behind `Arc`s, but nothing else holds them at this point, so
+        // `make_mut()` compacts them in place instead of cloning them.
+        let stroke_components = Arc::make_mut(&mut self.stroke_components);
+
+        stroke_components
+            .values_mut()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .for_each(|stroke| {
+                if !matches!(**stroke, Stroke::BitmapImage(_)) {
+                    return;
+                }
+
+                if let Stroke::BitmapImage(bitmapimage) = Arc::make_mut(stroke)
+                    && let Err(e) = bitmapimage.compact()
+                {
+                    // The pixels stay uncompressed, which only costs memory, so this is not fatal.
+                    error!("Compacting the pixels of a bitmap image failed, Err: {e:?}");
+                }
+            });
+    }
+
     /// Loads a snapshot from the bytes of a .rnote file.
     ///
     /// To import this snapshot into the current engine, use [`Engine::load_snapshot()`].
@@ -219,5 +253,54 @@ impl EngineSnapshot {
         });
 
         snapshot_receiver.await?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::image::{EncodedImage, ImageEncoding};
+    use crate::strokes::BitmapImage;
+    use crate::strokes::resize::ImageSizeOption;
+
+    #[test]
+    fn compacting_the_pixels_of_bitmap_images_is_lossless() {
+        let (pixel_width, pixel_height) = (8u32, 8u32);
+        let pixels: Vec<u8> = (0..pixel_width * pixel_height)
+            .flat_map(|i| [(i * 3 % 256) as u8, (i * 5 % 256) as u8, 0, 255])
+            .collect();
+        // A document as an older version of Rnote wrote it: the pixels are stored uncompressed.
+        let image = EncodedImage::from_premultiplied_rgba8(
+            &pixels,
+            pixel_width,
+            pixel_height,
+            ImageEncoding::Raw,
+        )
+        .expect("encoding the test image failed");
+        let bitmapimage = BitmapImage::from_encoded_image(
+            image,
+            Vector2::ZERO,
+            ImageSizeOption::RespectOriginalSize,
+        )
+        .expect("creating the test bitmap image failed");
+
+        let mut snapshot = EngineSnapshot::default();
+        Arc::make_mut(&mut snapshot.stroke_components)
+            .insert(Arc::new(Stroke::BitmapImage(bitmapimage)));
+
+        snapshot.compact_bitmap_images();
+
+        let stroke = snapshot
+            .stroke_components
+            .values()
+            .next()
+            .expect("the stroke should still be there");
+        let Stroke::BitmapImage(bitmapimage) = &**stroke else {
+            panic!("expected a bitmap image stroke");
+        };
+        assert_eq!(bitmapimage.image.encoding, ImageEncoding::Zstd);
+        assert!(!bitmapimage.image.needs_compaction());
+        // Compacting must not change the pixels.
+        assert_eq!(&bitmapimage.decoded_image().unwrap().data[..], &pixels[..]);
     }
 }

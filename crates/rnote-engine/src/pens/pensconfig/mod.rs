@@ -62,7 +62,7 @@ impl Default for PensConfig {
 }
 
 impl PensConfig {
-    pub const HIGHLIGHTER_ALPHA: f64 = 0.2; 
+    pub const HIGHLIGHTER_ALPHA: f64 = 0.2;
 
     pub fn set_all_stroke_colors(&mut self, stroke_color: Color) {
         self.brush_config.marker_options.stroke_color = Some(stroke_color);

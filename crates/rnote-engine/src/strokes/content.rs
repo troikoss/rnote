@@ -16,6 +16,44 @@ pub enum GeneratedContentImages {
     Full(Vec<Image>),
 }
 
+/// Rasterizes content for rendering in the app.
+///
+/// A larger `image_scale` value renders the images in a higher than native resolution (usually set
+/// as the camera zoom). The bounds are not scaled by it.
+///
+/// This is the default implementation of [`Content::gen_images`], and is also used by content that
+/// has to be rasterized in some situations, e.g. a bitmap image that is drawn much smaller than its
+/// pixels.
+pub(crate) fn gen_rasterized_images<C: Content>(
+    content: &C,
+    viewport: Aabb,
+    image_scale: f64,
+) -> Result<GeneratedContentImages, anyhow::Error> {
+    let bounds = content.bounds();
+
+    if viewport.contains(&bounds) {
+        Ok(GeneratedContentImages::Full(vec![Image::gen_with_piet(
+            |piet_cx| content.draw(piet_cx, image_scale),
+            bounds,
+            image_scale,
+        )?]))
+    } else if let Some(intersection_bounds) = viewport.intersection(&bounds) {
+        Ok(GeneratedContentImages::Partial {
+            images: vec![Image::gen_with_piet(
+                |piet_cx| content.draw(piet_cx, image_scale),
+                intersection_bounds,
+                image_scale,
+            )?],
+            viewport,
+        })
+    } else {
+        Ok(GeneratedContentImages::Partial {
+            images: vec![],
+            viewport,
+        })
+    }
+}
+
 pub(crate) const CONTENT_HIGHLIGHT_COLOR: piet::Color = color::GNOME_BLUES[1].with_a8(96);
 
 /// Types that are content.
@@ -40,29 +78,7 @@ where
         viewport: Aabb,
         image_scale: f64,
     ) -> Result<GeneratedContentImages, anyhow::Error> {
-        let bounds = self.bounds();
-
-        if viewport.contains(&bounds) {
-            Ok(GeneratedContentImages::Full(vec![Image::gen_with_piet(
-                |piet_cx| self.draw(piet_cx, image_scale),
-                bounds,
-                image_scale,
-            )?]))
-        } else if let Some(intersection_bounds) = viewport.intersection(&bounds) {
-            Ok(GeneratedContentImages::Partial {
-                images: vec![Image::gen_with_piet(
-                    |piet_cx| self.draw(piet_cx, image_scale),
-                    intersection_bounds,
-                    image_scale,
-                )?],
-                viewport,
-            })
-        } else {
-            Ok(GeneratedContentImages::Partial {
-                images: vec![],
-                viewport,
-            })
-        }
+        gen_rasterized_images(self, viewport, image_scale)
     }
 
     /// Draw the content highlight. Used when indicating a selection.

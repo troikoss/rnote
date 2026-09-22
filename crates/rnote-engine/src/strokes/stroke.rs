@@ -12,6 +12,7 @@ use crate::fileformats::xoppformat::{self, XoppColor};
 use crate::store::chrono_comp::StrokeLayer;
 use crate::strokes::textstroke::TextStyle;
 use crate::{Drawable, utils};
+use crate::{EncodedImage, ImageEncoding};
 use p2d::bounding_volume::Aabb;
 use p2d::glamx::DAffine2;
 use p2d::math::Vector2;
@@ -426,7 +427,8 @@ impl Stroke {
             cuboid: p2d::shape::Cuboid::new(bounds.half_extents()),
             affine: DAffine2::from_translation(bounds.center()),
         };
-        let image = Image::try_from_encoded_bytes(&bytes)?;
+        let image =
+            EncodedImage::from_image(Image::try_from_encoded_bytes(&bytes)?, ImageEncoding::Zstd)?;
 
         Ok(Stroke::BitmapImage(BitmapImage { image, rectangle }))
     }

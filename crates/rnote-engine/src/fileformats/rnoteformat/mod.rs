@@ -43,7 +43,7 @@ pub fn load_engine_snapshot_from_bytes(bytes: &[u8]) -> anyhow::Result<EngineSna
         Prelude::new(0, semver::Version::new(0, 0, 0), 0)
     };
 
-    match prelude.file_version {
+    let mut engine_snapshot = match prelude.file_version {
         1 => {
             RnoteFileInterface::bytes_to_engine_snapshot(cursor, prelude.header_size)
 
@@ -66,7 +66,15 @@ pub fn load_engine_snapshot_from_bytes(bytes: &[u8]) -> anyhow::Result<EngineSna
             LegacyRnoteFile::load_from_bytes(bytes)?,
         )?),
         _ => unreachable!(),
-    }
+    }?;
+
+    // The pixels of bitmap images are stored compressed, but images of files written before that
+    // was the case are read uncompressed. Compressing them here is what keeps the pixels of a
+    // document with many large bitmaps from being held in memory for the whole session; they are
+    // decoded again on demand when an image is rendered.
+    engine_snapshot.compact_bitmap_images();
+
+    Ok(engine_snapshot)
 }
 
 /// Simple wrapper function, for documentation, refer to [`RnoteFileInterface::engine_snapshot_to_bytes`]

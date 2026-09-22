@@ -36,7 +36,7 @@ pub use document::Document;
 pub use drawable::Drawable;
 pub use drawable::DrawableOnDoc;
 pub use engine::Engine;
-pub use image::Image;
+pub use image::{EncodedImage, Image, ImageEncoding};
 pub use pens::PenHolder;
 pub use selectioncollision::SelectionCollision;
 pub use store::StrokeStore;

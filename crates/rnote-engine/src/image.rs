@@ -24,7 +24,7 @@ pub const POINT_TO_PX_CONV_FACTOR: f64 = 72.0 / 96.0;
 pub const VIEWPORT_EXTENTS_MARGIN_FACTOR: f64 = 0.4;
 
 #[non_exhaustive]
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageMemoryFormat {
     R8g8b8a8Premultiplied,
 }
@@ -445,4 +445,325 @@ pub(super) fn convert_image_bgra_to_rgba(_width: u32, _height: u32, mut bytes: V
         src[3] = alpha;
     }
     bytes
+}
+
+/// The compression level used when compressing the pixel data of an [`EncodedImage`].
+///
+/// Chosen for a balance of encoding speed and size: on a scanned textbook page (1123x1589
+/// premultiplied RGBA8, 7.1 MB of pixels) level 1 encodes in 8 ms and level 3 in 12 ms, both
+/// producing 0.18 MB, and decoding either takes ~5 ms - an order of magnitude faster than decoding
+/// the equivalent Png, which encodes 10x slower and is no smaller.
+const IMAGE_ZSTD_COMPRESSION_LEVEL: i32 = 3;
+
+/// How the pixel data of an [`EncodedImage`] is encoded.
+#[non_exhaustive]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageEncoding {
+    /// Uncompressed pixel data, in [`ImageMemoryFormat`].
+    ///
+    /// This is how images were always stored, so it is what the images of files written by older
+    /// versions of Rnote are read as.
+    Raw,
+    /// Zstd-compressed pixel data.
+    ///
+    /// The pixels of a bitmap are large: a single 1123x1589 page of an imported Pdf is 7.1 MB, so a
+    /// 204 page document holds 1.4 GB of them. Keeping them compressed keeps the memory of a
+    /// document proportional to its compressed size instead of to its pixel count; the pixels are
+    /// then decoded on demand when the image is rendered, which is bounded by the viewport.
+    Zstd,
+}
+
+impl Default for ImageEncoding {
+    fn default() -> Self {
+        Self::Raw
+    }
+}
+
+/// A bitmap image whose pixel data is stored encoded, and decoded on demand.
+///
+/// Holding the decoded pixels of every image of a document is what makes documents with many large
+/// bitmaps (e.g. imported Pdf pages) use multiple GB of memory. An `EncodedImage` instead keeps its
+/// pixels encoded, and [`EncodedImage::decode`] materializes them only when the image is rendered.
+///
+/// The serde representation is a superset of the one of [`Image`], with the additional `encoding`
+/// field, so that images written before the pixels were compressed are read as
+/// [`ImageEncoding::Raw`].
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, rename = "image")]
+pub struct EncodedImage {
+    /// The encoded image data.
+    ///
+    /// Is (de)serialized with base64 encoding.
+    #[serde(rename = "data", with = "crate::utils::glib_bytes_base64")]
+    pub data: glib::Bytes,
+    /// The target rect in the coordinate space of the document.
+    #[serde(rename = "rectangle")]
+    pub rectangle: Rectangle,
+    /// Width of the decoded image data.
+    #[serde(rename = "pixel_width")]
+    pub pixel_width: u32,
+    /// Height of the decoded image data.
+    #[serde(rename = "pixel_height")]
+    pub pixel_height: u32,
+    /// Memory format of the decoded pixels.
+    #[serde(rename = "memory_format")]
+    pub memory_format: ImageMemoryFormat,
+    /// How [`EncodedImage::data`] is encoded.
+    #[serde(rename = "encoding")]
+    pub encoding: ImageEncoding,
+}
+
+impl Debug for EncodedImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncodedImage")
+            .field("data", &String::from("{.. no debug impl ..}"))
+            .field("encoding", &self.encoding)
+            .field("rect", &self.rectangle)
+            .field("pixel_width", &self.pixel_width)
+            .field("pixel_height", &self.pixel_height)
+            .field("memory_format", &self.memory_format)
+            .finish()
+    }
+}
+
+impl Default for EncodedImage {
+    fn default() -> Self {
+        Self {
+            data: glib::Bytes::from_owned(Vec::new()),
+            rectangle: Rectangle::default(),
+            pixel_width: 0,
+            pixel_height: 0,
+            memory_format: ImageMemoryFormat::default(),
+            encoding: ImageEncoding::default(),
+        }
+    }
+}
+
+impl EncodedImage {
+    /// Encodes the pixels of the given image with the given encoding.
+    pub fn from_image(image: Image, encoding: ImageEncoding) -> anyhow::Result<Self> {
+        image.assert_valid()?;
+
+        Ok(Self {
+            data: Self::encode(&image.data, encoding)?,
+            rectangle: image.rectangle,
+            pixel_width: image.pixel_width,
+            pixel_height: image.pixel_height,
+            memory_format: image.memory_format,
+            encoding,
+        })
+    }
+
+    /// Encodes a buffer of premultiplied RGBA8 bytes with the given encoding.
+    pub fn from_premultiplied_rgba8(
+        data: &[u8],
+        pixel_width: u32,
+        pixel_height: u32,
+        encoding: ImageEncoding,
+    ) -> anyhow::Result<Self> {
+        let bounds = Aabb::new(
+            Vector2::ZERO,
+            Vector2::new(pixel_width as f64, pixel_height as f64),
+        );
+        let rectangle = Rectangle::from_p2d_aabb(bounds);
+
+        // Assert validity without going through `Image`, which would copy the pixels.
+        if pixel_width == 0
+            || pixel_height == 0
+            || data.len() as u32 != 4 * pixel_width * pixel_height
+        {
+            return Err(anyhow::anyhow!(
+                "Creating encoded image from premultiplied rgba8 failed, invalid size or data."
+            ));
+        }
+
+        Ok(Self {
+            data: Self::encode(data, encoding)?,
+            rectangle,
+            pixel_width,
+            pixel_height,
+            memory_format: ImageMemoryFormat::R8g8b8a8Premultiplied,
+            encoding,
+        })
+    }
+
+    /// Decodes the stored pixels into an [`Image`].
+    ///
+    /// This is the expensive part of an [`EncodedImage`], which is why the decoded pixels are not
+    /// held by the image itself, but only by whatever renders it for as long as it is visible.
+    pub fn decode(&self) -> anyhow::Result<Image> {
+        let image = Image {
+            data: match self.encoding {
+                ImageEncoding::Raw => self.data.clone(),
+                ImageEncoding::Zstd => glib::Bytes::from_owned(Self::decompress(
+                    &self.data,
+                    self.pixel_width,
+                    self.pixel_height,
+                )?),
+            },
+            rectangle: self.rectangle,
+            pixel_width: self.pixel_width,
+            pixel_height: self.pixel_height,
+            memory_format: self.memory_format,
+        };
+        image.assert_valid()?;
+
+        Ok(image)
+    }
+
+    /// Compresses the stored pixels, so that the uncompressed pixels are not held in memory.
+    ///
+    /// Is a no-op if the image holds no data, or already is compressed.
+    pub fn compact(&mut self) -> anyhow::Result<()> {
+        if !self.needs_compaction() || self.data.is_empty() {
+            return Ok(());
+        }
+
+        self.data = Self::encode(&self.data, ImageEncoding::Zstd)?;
+        self.encoding = ImageEncoding::Zstd;
+
+        Ok(())
+    }
+
+    /// Whether the stored pixels are uncompressed, and hence can be [`EncodedImage::compact`]ed.
+    pub fn needs_compaction(&self) -> bool {
+        self.encoding == ImageEncoding::Raw && self.pixel_width > 0 && self.pixel_height > 0
+    }
+
+    /// Whether the image holds any pixels.
+    pub fn is_empty(&self) -> bool {
+        self.pixel_width == 0 || self.pixel_height == 0 || self.data.is_empty()
+    }
+
+    pub fn assert_valid(&self) -> anyhow::Result<()> {
+        self.rectangle.bounds().assert_valid()?;
+
+        if self.pixel_width == 0 || self.pixel_height == 0 {
+            return Err(anyhow::anyhow!(
+                "Asserting encoded image validity failed, invalid size."
+            ));
+        }
+
+        // Encoded data has no length to check against, but uncompressed pixels must match the
+        // memory format.
+        if self.encoding == ImageEncoding::Raw
+            && self.data.len() as u32 != 4 * self.pixel_width * self.pixel_height
+        {
+            return Err(anyhow::anyhow!(
+                "Asserting encoded image validity failed, invalid size or data."
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn encode(data: &[u8], encoding: ImageEncoding) -> anyhow::Result<glib::Bytes> {
+        match encoding {
+            ImageEncoding::Raw => Ok(glib::Bytes::from_owned(data.to_vec())),
+            ImageEncoding::Zstd => zstd::bulk::compress(data, IMAGE_ZSTD_COMPRESSION_LEVEL)
+                .map(glib::Bytes::from_owned)
+                .context("Compressing image data failed."),
+        }
+    }
+
+    fn decompress(data: &[u8], pixel_width: u32, pixel_height: u32) -> anyhow::Result<Vec<u8>> {
+        // Decompressing with the exact expected size also guards against decompression bombs.
+        let expected_len = 4 * pixel_width as usize * pixel_height as usize;
+
+        zstd::bulk::decompress(data, expected_len).context("Decompressing image data failed.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An image with a pattern, so that compressing it has something to work with.
+    fn test_image() -> Image {
+        let (pixel_width, pixel_height) = (37u32, 23u32);
+        let data = (0..pixel_width * pixel_height)
+            .flat_map(|i| {
+                let x = i % pixel_width;
+                let y = i / pixel_width;
+                [(x * 7 % 256) as u8, (y * 11 % 256) as u8, 0, 255]
+            })
+            .collect::<Vec<u8>>();
+
+        Image::from_premultiplied_rgba8(data, pixel_width, pixel_height)
+    }
+
+    fn assert_same_pixels(decoded: &Image, expected: &Image) {
+        assert_eq!(decoded.pixel_width, expected.pixel_width);
+        assert_eq!(decoded.pixel_height, expected.pixel_height);
+        assert_eq!(decoded.rectangle.affine, expected.rectangle.affine);
+        assert_eq!(decoded.memory_format, expected.memory_format);
+        assert_eq!(&decoded.data[..], &expected.data[..], "pixel data changed");
+    }
+
+    #[test]
+    fn encoding_and_decoding_an_image_is_lossless() {
+        let image = test_image();
+
+        for encoding in [ImageEncoding::Raw, ImageEncoding::Zstd] {
+            let encoded = EncodedImage::from_image(image.clone(), encoding)
+                .expect("encoding the image failed");
+            assert_eq!(encoded.encoding, encoding);
+
+            assert_same_pixels(&encoded.decode().expect("decoding failed"), &image);
+        }
+    }
+
+    #[test]
+    fn compacting_an_encoded_image_is_lossless() {
+        let image = test_image();
+        let mut encoded =
+            EncodedImage::from_image(image.clone(), ImageEncoding::Raw).expect("encoding failed");
+        assert!(encoded.needs_compaction());
+        let uncompressed_len = encoded.data.len();
+
+        encoded.compact().expect("compacting failed");
+
+        assert!(!encoded.needs_compaction());
+        assert!(encoded.data.len() < uncompressed_len);
+        assert_same_pixels(&encoded.decode().expect("decoding failed"), &image);
+
+        // Compacting again must not change anything.
+        let compacted_len = encoded.data.len();
+        encoded.compact().expect("compacting again failed");
+        assert_eq!(encoded.data.len(), compacted_len);
+    }
+
+    #[test]
+    fn images_written_before_the_pixels_were_compressed_are_read_as_raw() {
+        let image = test_image();
+
+        // `Image` is how the pixels were stored before `EncodedImage` existed, so serializing it
+        // produces exactly the representation an older Rnote version wrote.
+        let legacy_json = serde_json::to_string(&image).expect("serializing the image failed");
+        assert!(
+            !legacy_json.contains("encoding"),
+            "the representation written by older versions has no encoding field"
+        );
+
+        let encoded: EncodedImage =
+            serde_json::from_str(&legacy_json).expect("reading the legacy representation failed");
+        assert_eq!(encoded.encoding, ImageEncoding::Raw);
+        assert!(encoded.needs_compaction());
+
+        assert_same_pixels(&encoded.decode().expect("decoding failed"), &image);
+    }
+
+    #[test]
+    fn encoded_images_are_read_back_as_they_were_written() {
+        let image = test_image();
+        let encoded =
+            EncodedImage::from_image(image.clone(), ImageEncoding::Zstd).expect("encoding failed");
+
+        let json = serde_json::to_string(&encoded).expect("serializing failed");
+        let read_back: EncodedImage = serde_json::from_str(&json).expect("reading failed");
+
+        assert_eq!(read_back.encoding, ImageEncoding::Zstd);
+        assert!(!read_back.needs_compaction());
+        assert_same_pixels(&read_back.decode().expect("decoding failed"), &image);
+    }
 }

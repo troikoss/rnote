@@ -422,7 +422,7 @@ mod tests {
     use super::*;
 
     use crate::document::Format;
-    use crate::image::ImageMemoryFormat;
+    use crate::image::{ImageEncoding, ImageMemoryFormat};
 
     /// Page size used by the first page of the fixtures.
     const PAGE_W: f64 = 200.0;
@@ -536,36 +536,47 @@ mod tests {
         assert_eq!(images.len(), 3, "one stroke per page");
 
         for image in &images {
+            // The pixels of an imported page are stored compressed and decoded on demand, so that
+            // a document does not keep the pixels of every page in memory.
+            assert_eq!(
+                image.image.encoding,
+                ImageEncoding::Zstd,
+                "imported pages should be stored with compressed pixels"
+            );
+            let decoded = image
+                .decoded_image()
+                .expect("decoding the imported page failed");
+            assert!(
+                image.image.data.len() < decoded.data.len(),
+                "the compressed page should be smaller than its pixels"
+            );
+
             // The page's aspect ratio survives rendering (up to rounding to whole pixels).
-            let rendered = image.image.pixel_width as f64 / image.image.pixel_height as f64;
+            let rendered = decoded.pixel_width as f64 / decoded.pixel_height as f64;
             assert!(
                 (rendered - PAGE_W / PAGE_H).abs() < 0.01,
                 "page aspect ratio {rendered} does not match {}",
                 PAGE_W / PAGE_H
             );
             assert!(matches!(
-                image.image.memory_format,
+                decoded.memory_format,
                 ImageMemoryFormat::R8g8b8a8Premultiplied
             ));
             assert_eq!(
-                image.image.data.len(),
-                (image.image.pixel_width * image.image.pixel_height * 4) as usize,
+                decoded.data.len(),
+                (decoded.pixel_width * decoded.pixel_height * 4) as usize,
                 "the pixel buffer must match ImageMemoryFormat"
             );
 
             // Pdf import renders on an opaque white background, so the buffer is fully opaque and
             // premultiplied values can be compared as plain RGB.
-            let center = pixel(
-                &image.image,
-                image.image.pixel_width / 2,
-                image.image.pixel_height / 2,
-            );
+            let center = pixel(&decoded, decoded.pixel_width / 2, decoded.pixel_height / 2);
             assert!(
                 center == [0, 0, 0, 255],
                 "the black center rectangle should render black, got {center:?}"
             );
 
-            let corner = pixel(&image.image, 2, 2);
+            let corner = pixel(&decoded, 2, 2);
             assert!(
                 corner == [255, 255, 255, 255],
                 "the page margin should render white, got {corner:?}"

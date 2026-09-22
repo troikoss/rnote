@@ -143,7 +143,7 @@ fn main() -> anyhow::Result<()> {
 
     // Import every page (page_range = None means "all pages", the default behaviour).
     let mut pixel_hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let (dimensions, retained): (Vec<(u32, u32)>, u64) = match prefs.pages_type {
+    let (dimensions, retained, pixels): (Vec<(u32, u32)>, u64, u64) = match prefs.pages_type {
         PdfImportPagesType::Bitmap => {
             let strokes = BitmapImage::from_pdf_bytes(
                 bytes,
@@ -157,11 +157,15 @@ fn main() -> anyhow::Result<()> {
                 .iter()
                 .map(|s| (s.image.pixel_width, s.image.pixel_height))
                 .collect();
+            // What the document keeps resident are the encoded pixels, not the decoded ones.
+            let retained: u64 = strokes.iter().map(|s| s.image.data.len() as u64).sum();
             for s in strokes.iter() {
-                pixel_hash = fnv1a(&s.image.data, pixel_hash);
+                // Hash the decoded pixels: they are what the import produced, so the hash stays
+                // comparable when the storage encoding changes.
+                pixel_hash = fnv1a(&s.decoded_image()?.data, pixel_hash);
             }
-            let retained = retained_bytes(&dims);
-            (dims, retained)
+            let pixels = retained_bytes(&dims);
+            (dims, retained, pixels)
         }
         PdfImportPagesType::Vector => {
             let strokes = VectorImage::from_pdf_bytes(
@@ -177,7 +181,7 @@ fn main() -> anyhow::Result<()> {
                 pixel_hash = fnv1a(s.svg_data.as_bytes(), pixel_hash);
             }
             let svg_bytes: u64 = strokes.iter().map(|s| s.svg_data.len() as u64).sum();
-            (Vec::new(), svg_bytes)
+            (Vec::new(), svg_bytes, 0)
         }
     };
 
@@ -196,6 +200,13 @@ fn main() -> anyhow::Result<()> {
         println!("pages imported  (vector mode)");
     }
     println!("retained        {:.1} MB", retained as f64 / 1e6);
+    if pixels > 0 {
+        println!(
+            "pixels          {:.1} MB decoded ({:.1}x)",
+            pixels as f64 / 1e6,
+            pixels as f64 / retained.max(1) as f64
+        );
+    }
     println!("\n-- peak memory --");
     println!("PEAK ALLOCATED  {:.1} MB", peak_allocated_mb());
     println!("live allocated  {:.1} MB", live_allocated_mb());
