@@ -251,6 +251,20 @@ impl Composer<SmoothOptions> for PenPath {
             return;
         };
 
+        // For highlighter mode, draw with full opacity; the original alpha is applied to the
+        // generated image during final compositing (see `BrushStroke`), so it must not be
+        // baked into the drawn color here as well.
+        let draw_color = if options.is_highlighter {
+            crate::Color {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+                a: 1.0,
+            }
+        } else {
+            color
+        };
+
         let mut full_path = kurbo::BezPath::new();
         let mut single_pos = true;
         let mut prev = self.start;
@@ -352,7 +366,9 @@ impl Composer<SmoothOptions> for PenPath {
             full_path.extend(bez_path);
         }
 
-        cx.fill(full_path, &Into::<piet::Color>::into(color));
+        // The whole path is filled in one go: filling each segment separately would
+        // double-blend the overlap areas of semi-transparent strokes.
+        cx.fill(full_path, &Into::<piet::Color>::into(draw_color));
 
         // Single element/position strokes need special treatment to be rendered
         if single_pos {
@@ -361,7 +377,7 @@ impl Composer<SmoothOptions> for PenPath {
                 .apply(options.stroke_width, self.start.pressure);
             cx.fill(
                 kurbo::Circle::new(self.start.pos.to_kurbo_point(), start_width * 0.5),
-                &Into::<piet::Color>::into(color),
+                &Into::<piet::Color>::into(draw_color),
             );
         }
 

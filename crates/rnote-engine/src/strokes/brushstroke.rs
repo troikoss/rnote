@@ -59,8 +59,21 @@ impl Content for BrushStroke {
 
         let stroke_opacity_condition = self.style.stroke_color().is_some_and(|color| color.a < 1.0);
 
+        // Check if this is a highlighter stroke - highlighter strokes must be rendered as a single
+        // image to prevent alpha accumulation at segment overlaps
+        let is_highlighter =
+            matches!(&self.style, Style::Smooth(options) if options.is_highlighter);
+        let highlighter_alpha = match &self.style {
+            Style::Smooth(options) => options.highlighter_alpha(),
+            _ => None,
+        };
+
         // if these conditions evaluate true the stroke is rendered as a single image
-        let images = if image_size_condition || stroke_width_condition || stroke_opacity_condition {
+        let images = if image_size_condition
+            || stroke_width_condition
+            || stroke_opacity_condition
+            || is_highlighter
+        {
             // generate a single image when bounds are smaller than threshold
             match &self.style {
                 Style::Smooth(options) => {
@@ -74,7 +87,13 @@ impl Content for BrushStroke {
                     );
 
                     match image {
-                        Ok(image) => vec![image],
+                        Ok(mut image) => {
+                            // Apply highlighter alpha if this is a highlighter stroke
+                            if let Some(alpha) = highlighter_alpha {
+                                image.apply_alpha(alpha);
+                            }
+                            vec![image]
+                        }
                         Err(e) => {
                             error!("Generating images for brushstroke failed , Err: {e:?}");
                             vec![]
@@ -325,7 +344,7 @@ impl BrushStroke {
                         .copied(),
                 );
 
-                let image = Image::gen_with_piet(
+                let mut image = Image::gen_with_piet(
                     |piet_cx| {
                         range_path.draw_composed(piet_cx, options);
                         Ok(())
@@ -333,6 +352,11 @@ impl BrushStroke {
                     range_path.composed_bounds(options),
                     image_scale,
                 )?;
+
+                // Apply highlighter alpha if this is a highlighter stroke
+                if let Some(alpha) = options.highlighter_alpha() {
+                    image.apply_alpha(alpha);
+                }
 
                 Some(image)
             }
@@ -373,5 +397,88 @@ impl BrushStroke {
         };
 
         Ok(image)
+    }
+
+    /// Strokes shorter than this will not be auto-straightened.
+    const MIN_STROKE_LENGTH_FOR_STRAIGHTENING: f64 = 1.0;
+
+    /// A value of 1.5 means the path can deviate by up to 1.5x the stroke width
+    /// from the ideal straight line and still be auto-straightened.
+    const AUTO_STRAIGHTEN_THRESHOLD_RATIO: f64 = 1.5;
+
+    pub fn is_straight_path(&self, max_deviation_ratio: f64) -> bool {
+        if self.path.segments.is_empty() {
+            return true;
+        }
+
+        let start_pos = self.path.start.pos;
+        let end_pos = self
+            .path
+            .segments
+            .last()
+            .map(|s| s.end().pos)
+            .unwrap_or(start_pos);
+
+        // If start and end are too close, not a meaningful line
+        let total_length = (end_pos - start_pos).length();
+        if total_length < Self::MIN_STROKE_LENGTH_FOR_STRAIGHTENING {
+            return false;
+        }
+
+        // Direction vector from start to end (normalized)
+        let direction = (end_pos - start_pos).normalize();
+
+        // Calculate the perpendicular distance of each point from the ideal line
+        let stroke_width = self.style.stroke_width();
+        let max_deviation = stroke_width * max_deviation_ratio;
+
+        for seg in &self.path.segments {
+            let point = seg.end().pos;
+
+            let to_point = point - start_pos;
+
+            let projection = to_point.dot(direction);
+
+            let closest_on_line = start_pos + direction * projection;
+
+            // Perpendicular distance from the ideal line
+            let deviation = (point - closest_on_line).length();
+
+            if deviation > max_deviation {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn straighten_path(&mut self) {
+        if self.path.segments.is_empty() {
+            return;
+        }
+
+        let start = self.path.start;
+        let end = self.path.segments.last().map(|s| s.end()).unwrap_or(start);
+
+        // Create a new path with just one segment: a line from start to end
+        let new_path = PenPath::new_w_segments(start, [Segment::LineTo { end }]);
+        self.replace_path(new_path);
+    }
+
+    pub fn auto_straighten_if_applicable(&mut self) -> bool {
+        // Check if this is a highlighter stroke
+        let is_highlighter =
+            matches!(&self.style, Style::Smooth(options) if options.is_highlighter);
+
+        if !is_highlighter {
+            return false;
+        }
+
+        if self.is_straight_path(Self::AUTO_STRAIGHTEN_THRESHOLD_RATIO) {
+            self.straighten_path();
+            true
+        } else {
+            false
+        }
     }
 }
