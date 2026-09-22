@@ -1887,7 +1887,7 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.7.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "bytemuck",
  "fearless_simd 1.0.0",
@@ -1902,12 +1902,12 @@ dependencies = [
 [[package]]
 name = "hayro-ccitt"
 version = "0.3.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 
 [[package]]
 name = "hayro-cmap"
 version = "0.1.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "brotli",
  "hayro-postscript",
@@ -1916,7 +1916,7 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.7.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "bitflags 2.13.0",
  "hayro-cmap",
@@ -1934,7 +1934,7 @@ dependencies = [
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "fearless_simd 1.0.0",
  "hayro-ccitt",
@@ -1943,7 +1943,7 @@ dependencies = [
 [[package]]
 name = "hayro-jpeg2000"
 version = "0.4.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "fearless_simd 1.0.0",
 ]
@@ -1951,12 +1951,12 @@ dependencies = [
 [[package]]
 name = "hayro-postscript"
 version = "0.1.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 
 [[package]]
 name = "hayro-svg"
 version = "0.7.0"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "base64",
  "hayro-interpret",
@@ -1970,7 +1970,7 @@ dependencies = [
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/LaurenzV/hayro?rev=6dcda45859b7e9cc8488fb6cd011795ba0cca86b#6dcda45859b7e9cc8488fb6cd011795ba0cca86b"
+source = "git+https://github.com/troikoss/hayro?rev=07455eac6bb934fed0a89a7fc2a33659729cc02a#07455eac6bb934fed0a89a7fc2a33659729cc02a"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -5706,9 +5706,9 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zune-core"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb8a0807f7c01457d0379ba880ba6322660448ddebc890ce29bb64da71fb40f9"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
 
 [[package]]
 name = "zune-inflate"
@@ -5721,9 +5721,8 @@ dependencies = [
 
 [[package]]
 name = "zune-jpeg"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+version = "0.5.16"
+source = "git+https://github.com/troikoss/zune-image?rev=3d0b7dbc59da1b0dc427ca80ecbe2dbb34321c58#3d0b7dbc59da1b0dc427ca80ecbe2dbb34321c58"
 dependencies = [
  "zune-core",
 ]

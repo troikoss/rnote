@@ -39,8 +39,10 @@ gio = "0.21.1"
 glib = "0.21.1"
 glib-build-tools = "0.21.0"
 gtk4 = { version = "0.10.0", features = ["v4_18"] }
-hayro = { git = "https://github.com/LaurenzV/hayro", rev = "6dcda45859b7e9cc8488fb6cd011795ba0cca86b" }
-hayro-svg = { git = "https://github.com/LaurenzV/hayro", rev = "6dcda45859b7e9cc8488fb6cd011795ba0cca86b" }
+# Local fork: main plus the DCTDecode change that forwards the renderer's
+# decode-size hint to zune-jpeg (branch zune-jpeg-scaled-decode).
+hayro = { git = "https://github.com/troikoss/hayro", rev = "07455eac6bb934fed0a89a7fc2a33659729cc02a" }
+hayro-svg = { git = "https://github.com/troikoss/hayro", rev = "07455eac6bb934fed0a89a7fc2a33659729cc02a" }
 ijson = "0.1.4"
 image = { version = "0.25.6", default-features = false, features = [
     "rayon",
@@ -98,6 +100,10 @@ winresource = "0.1.20"
 xmlwriter = "0.1.0"
 
 [patch.crates-io]
+# hayro's DCTDecode change needs the reduced-size JPEG decode, which is not in
+# any released zune-jpeg (branch zune-jpeg-scaled-decode). Both patches are
+# local-only: revert this section and the hayro pin above to drop them.
+zune-jpeg = { git = "https://github.com/troikoss/zune-image", rev = "3d0b7dbc59da1b0dc427ca80ecbe2dbb34321c58" }
 
 [profile.dev]
 debug = true
